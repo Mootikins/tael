@@ -3,13 +3,12 @@
 //! Provides an inline viewport TUI that doesn't take over the terminal.
 
 use std::io;
-use std::time::Duration;
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use ratatui::{
-    crossterm::{
-        event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
-        terminal::{disable_raw_mode, enable_raw_mode},
-    },
+    crossterm::event::{self, KeyCode, KeyEventKind, KeyModifiers},
     layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -23,11 +22,38 @@ use crate::{Inbox, Status};
 /// Height of the inline TUI (title + hints + separator + content + bottom border)
 const TUI_HEIGHT: u16 = 12;
 
+/// Events for the TUI
+enum TuiEvent {
+    Key(event::KeyEvent),
+    Tick,
+}
+
+/// Spawn input handling thread (required for inline viewport)
+fn spawn_input_thread(tx: mpsc::Sender<TuiEvent>) {
+    let tick_rate = Duration::from_millis(200);
+    thread::spawn(move || {
+        let mut last_tick = Instant::now();
+        loop {
+            let timeout = tick_rate.saturating_sub(last_tick.elapsed());
+            if event::poll(timeout).unwrap_or(false) {
+                if let Ok(event::Event::Key(key)) = event::read() {
+                    if tx.send(TuiEvent::Key(key)).is_err() {
+                        break;
+                    }
+                }
+            }
+            if last_tick.elapsed() >= tick_rate {
+                if tx.send(TuiEvent::Tick).is_err() {
+                    break;
+                }
+                last_tick = Instant::now();
+            }
+        }
+    });
+}
+
 /// Run interactive TUI mode with inline viewport
 pub fn run_interactive(config: &Config) -> io::Result<()> {
-    use std::io::stdout;
-    use ratatui::{backend::CrosstermBackend, Terminal};
-
     let path = crate::file::default_path();
     let inbox = crate::file::load(&path)?;
 
@@ -35,19 +61,19 @@ pub fn run_interactive(config: &Config) -> io::Result<()> {
     let item_count = inbox.items.len();
     let height = (item_count as u16 + 5).min(TUI_HEIGHT).max(6); // min 6 for empty state
 
-    // Manual setup for debugging - enable raw mode FIRST
-    enable_raw_mode()?;
-
-    // Create terminal with inline viewport manually
-    let backend = CrosstermBackend::new(stdout());
-    let mut terminal = Terminal::with_options(backend, TerminalOptions {
+    // Use ratatui's init_with_options for inline viewport
+    let mut terminal = ratatui::init_with_options(TerminalOptions {
         viewport: Viewport::Inline(height),
-    })?;
+    });
 
-    let result = run_app(&mut terminal, inbox, config, &path);
+    // Spawn input thread (inline viewport pattern from ratatui examples)
+    let (tx, rx) = mpsc::channel();
+    spawn_input_thread(tx);
+
+    let result = run_app(&mut terminal, inbox, config, &path, rx);
 
     // Cleanup
-    disable_raw_mode()?;
+    ratatui::restore();
     println!();
 
     result
@@ -128,20 +154,21 @@ impl App {
     }
 }
 
-fn run_app<B: ratatui::backend::Backend>(
-    terminal: &mut ratatui::Terminal<B>,
+fn run_app(
+    terminal: &mut ratatui::DefaultTerminal,
     inbox: Inbox,
     config: &Config,
     path: &std::path::Path,
+    rx: mpsc::Receiver<TuiEvent>,
 ) -> io::Result<()> {
     let mut app = App::new(inbox, path.to_path_buf());
 
     loop {
         terminal.draw(|frame| draw(frame, &mut app))?;
 
-        // Poll for events with timeout (like ratatui examples)
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
+        // Receive events from input thread
+        match rx.recv() {
+            Ok(TuiEvent::Key(key)) => {
                 // Only process key press events, not release
                 if key.kind != KeyEventKind::Press {
                     continue;
@@ -162,6 +189,10 @@ fn run_app<B: ratatui::backend::Backend>(
                     _ => {}
                 }
             }
+            Ok(TuiEvent::Tick) => {
+                // Tick - could refresh inbox here if needed
+            }
+            Err(_) => break, // Channel closed
         }
     }
 
