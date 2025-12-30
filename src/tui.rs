@@ -2,18 +2,15 @@
 //!
 //! Provides an inline viewport TUI that doesn't take over the terminal.
 
-use std::io::{self, stdout};
+use std::io;
 
 use ratatui::{
-    crossterm::{
-        event::{self, Event, KeyCode, KeyModifiers},
-        terminal::{disable_raw_mode, enable_raw_mode},
-    },
+    crossterm::event::{self, Event, KeyCode, KeyModifiers},
     layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
-    Frame, Terminal, TerminalOptions, Viewport,
+    DefaultTerminal, Frame, TerminalOptions, Viewport,
 };
 
 use crate::config::Config;
@@ -31,20 +28,15 @@ pub fn run_interactive(config: &Config) -> io::Result<()> {
     let item_count = inbox.items.len();
     let height = (item_count as u16 + 5).min(TUI_HEIGHT).max(6); // min 6 for empty state
 
-    // Enable raw mode for keyboard input
-    enable_raw_mode()?;
-
-    // Create terminal with inline viewport
-    let backend = ratatui::backend::CrosstermBackend::new(stdout());
-    let options = TerminalOptions {
+    // Use ratatui's init_with_options which handles raw mode automatically
+    let mut terminal = ratatui::init_with_options(TerminalOptions {
         viewport: Viewport::Inline(height),
-    };
-    let mut terminal = Terminal::with_options(backend, options)?;
+    });
 
     let result = run_app(&mut terminal, inbox, config, &path);
 
-    // Disable raw mode and print newline after TUI exits
-    disable_raw_mode()?;
+    // Restore terminal state (disables raw mode, etc.)
+    ratatui::restore();
     println!();
 
     result
@@ -126,7 +118,7 @@ impl App {
 }
 
 fn run_app(
-    terminal: &mut Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>,
+    terminal: &mut DefaultTerminal,
     inbox: Inbox,
     config: &Config,
     path: &std::path::Path,
