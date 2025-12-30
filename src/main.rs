@@ -70,6 +70,25 @@ enum Commands {
         #[arg(long, value_delimiter = ',')]
         group_by: Vec<String>,
     },
+
+    /// Launch TUI in a floating pane (Zellij)
+    Float {
+        /// Position preset: top-right, top-left, bottom-right, bottom-left, center
+        #[arg(long, short = 'p', default_value = "top-right")]
+        position: String,
+
+        /// Width (e.g., 30%, 40)
+        #[arg(long, default_value = "35%")]
+        width: String,
+
+        /// Height (e.g., 50%, 20)
+        #[arg(long, default_value = "50%")]
+        height: String,
+
+        /// Group by attribute (e.g., proj, status)
+        #[arg(long, value_delimiter = ',')]
+        group_by: Vec<String>,
+    },
 }
 
 /// Extract value from JSON using @.field syntax
@@ -244,6 +263,63 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         Commands::Tui { group_by } => {
             tael::tui::run_interactive(&config, &group_by)?;
+        }
+
+        Commands::Float {
+            position,
+            width,
+            height,
+            group_by,
+        } => {
+            // Only works in Zellij
+            if std::env::var("ZELLIJ").is_err() {
+                return Err("float command requires Zellij".into());
+            }
+
+            // Parse position preset to x,y coordinates
+            let (x, y) = match position.as_str() {
+                "top-right" => ("65%", "0"),
+                "top-left" => ("0", "0"),
+                "bottom-right" => ("65%", "50%"),
+                "bottom-left" => ("0", "50%"),
+                "center" => ("33%", "25%"),
+                _ => return Err(format!("unknown position '{}': use top-right, top-left, bottom-right, bottom-left, center", position).into()),
+            };
+
+            // Build tael tui command with group_by if specified
+            let mut tael_args = vec!["tui".to_string()];
+            if !group_by.is_empty() {
+                tael_args.push("--group-by".to_string());
+                tael_args.push(group_by.join(","));
+            }
+
+            // Get path to current executable
+            let exe = std::env::current_exe()?;
+
+            // Launch floating pane via zellij
+            let status = std::process::Command::new("zellij")
+                .args([
+                    "run",
+                    "--floating",
+                    "--name",
+                    "tael",
+                    "--x",
+                    x,
+                    "--y",
+                    y,
+                    "--width",
+                    &width,
+                    "--height",
+                    &height,
+                    "--",
+                ])
+                .arg(&exe)
+                .args(&tael_args)
+                .status()?;
+
+            if !status.success() {
+                return Err("failed to launch floating pane".into());
+            }
         }
     }
 

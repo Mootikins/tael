@@ -54,6 +54,14 @@ pub fn run_interactive(config: &Config, group_by: &[String]) -> io::Result<()> {
                     (KeyCode::Char('k'), _) | (KeyCode::Up, _) => app.previous(),
                     (KeyCode::Char('d'), _) => app.delete_selected(),
                     (KeyCode::Char('r'), _) => app.reload(),
+                    (KeyCode::Char('p'), _) => {
+                        // Toggle pinned state - keeps floating pane always-on-top (Zellij only)
+                        if std::env::var("ZELLIJ").is_ok() {
+                            let _ = std::process::Command::new("zellij")
+                                .args(["action", "toggle-pane-pinned"])
+                                .status();
+                        }
+                    }
                     (KeyCode::Enter, _) => {
                         if let Some(pane_id) = app.selected_pane_id() {
                             // Restore terminal before focusing
@@ -173,6 +181,8 @@ fn draw(frame: &mut Frame, app: &mut App) {
         Span::raw(":focus  "),
         Span::styled("d", Style::default().fg(Color::Yellow)),
         Span::raw(":del  "),
+        Span::styled("p", Style::default().fg(Color::Yellow)),
+        Span::raw(":pin  "),
         Span::styled("r", Style::default().fg(Color::Yellow)),
         Span::raw(":reload  "),
         Span::styled("q", Style::default().fg(Color::Yellow)),
