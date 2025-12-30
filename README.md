@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="tael logo" width="128">
+  <img src="assets/mascot.png" alt="tael mascot" width="128">
 </p>
 
 <h1 align="center">tael</h1>
