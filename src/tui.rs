@@ -30,7 +30,11 @@ pub fn run_interactive(config: &Config) -> io::Result<()> {
 
         // Poll with timeout
         if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
+            let evt = event::read()?;
+            // Debug: show what event we got
+            app.last_event = Some(format!("{:?}", evt));
+
+            if let Event::Key(key) = evt {
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
@@ -62,6 +66,7 @@ struct App {
     inbox: Inbox,
     list_state: ListState,
     path: std::path::PathBuf,
+    last_event: Option<String>, // Debug: show last event
 }
 
 impl App {
@@ -70,7 +75,7 @@ impl App {
         if !inbox.is_empty() {
             list_state.select(Some(0));
         }
-        Self { inbox, list_state, path }
+        Self { inbox, list_state, path, last_event: None }
     }
 
     fn next(&mut self) {
@@ -136,13 +141,24 @@ impl App {
 fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
-    // Split area: hints (1 line) + separator (1 line) + content
+    // Split area: hints (1 line) + debug (1 line) + separator (1 line) + content
     let chunks = Layout::vertical([
         Constraint::Length(1), // hints
+        Constraint::Length(1), // debug line
         Constraint::Length(1), // separator line
         Constraint::Min(1),    // content
     ])
     .split(area);
+
+    // Debug: show last event
+    let debug = match &app.last_event {
+        Some(e) => format!("Last event: {}", e),
+        None => "No events yet...".to_string(),
+    };
+    frame.render_widget(
+        Paragraph::new(debug).style(Style::default().fg(Color::Red)),
+        chunks[1],
+    );
 
     // Hints line
     let hints = Line::from(vec![
@@ -160,24 +176,24 @@ fn draw(frame: &mut Frame, app: &mut App) {
     frame.render_widget(Paragraph::new(hints).style(Style::default().fg(Color::DarkGray)), chunks[0]);
 
     // Separator
-    let sep = "─".repeat(chunks[1].width as usize);
+    let sep = "─".repeat(chunks[2].width as usize);
     frame.render_widget(
         Paragraph::new(sep).style(Style::default().fg(Color::DarkGray)),
-        chunks[1],
+        chunks[2],
     );
 
     // Content area
     if app.inbox.is_empty() {
         let empty = Paragraph::new("  (no items)")
             .style(Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC));
-        frame.render_widget(empty, chunks[2]);
+        frame.render_widget(empty, chunks[3]);
     } else {
         // Build list items with section headers inline
         let items = build_list_items(&app.inbox);
         let list = List::new(items)
             .highlight_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
             .highlight_symbol("▶ ");
-        frame.render_stateful_widget(list, chunks[2], &mut app.list_state);
+        frame.render_stateful_widget(list, chunks[3], &mut app.list_state);
     }
 }
 
