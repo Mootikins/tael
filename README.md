@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/mascot.png" alt="tael mascot" width="128">
+  <img src="assets/mascot.png" alt="tael mascot" width="160">
 </p>
 
 <h1 align="center">tael</h1>
@@ -47,23 +47,25 @@ cargo install --path .
 # Open interactive TUI (default)
 tael
 
-# Add an item
-tael add "claude-code: Waiting for input" -p 42 --project myproject
+# Add an item with attributes
+tael add -a "msg=claude-code: Waiting for input" -a pane=42 -a proj=myproject
 
-# Add with git branch
-tael add "claude-code: Review needed" -p 42 --project myproject -b feat/login
+# Add with JSON stdin (extract fields with @.field syntax)
+echo '{"message":"Auth needed"}' | tael add -a "msg=@.message" -a pane=42
 
-# List items
+# Claude Code preset (extracts message/type from JSON stdin)
+echo "$NOTIFICATION_JSON" | tael add --from-claude-code -a pane=$PANE_ID
+
+# List items (with optional grouping)
 tael list
+tael list --group-by proj
+tael list --group-by status,proj
 
-# Remove item
-tael remove -p 42
+# Remove item by pane
+tael remove -a pane=42
 
 # Clear all
 tael clear
-
-# Show config
-tael config
 ```
 
 ### TUI Keybindings
@@ -90,7 +92,10 @@ Add to `~/.claude/settings.json`:
       {
         "matcher": "",
         "hooks": [
-          "tael add \"$CLAUDE_NOTIFICATION\" -p \"$ZELLIJ_PANE_ID\" --project \"$(basename $PWD)\" -b \"$(git branch --show-current 2>/dev/null)\""
+          {
+            "type": "command",
+            "command": "tael add --from-claude-code -a pane=$ZELLIJ_PANE_ID -a proj=$(basename $PWD) -a branch=$(git branch --show-current 2>/dev/null)"
+          }
         ]
       }
     ],
@@ -98,13 +103,18 @@ Add to `~/.claude/settings.json`:
       {
         "matcher": "",
         "hooks": [
-          "tael remove -p \"$ZELLIJ_PANE_ID\""
+          {
+            "type": "command",
+            "command": "tael remove -a pane=$ZELLIJ_PANE_ID"
+          }
         ]
       }
     ]
   }
 }
 ```
+
+The `--from-claude-code` flag reads JSON from stdin and extracts `message` and `notification_type` fields automatically.
 
 ### Zellij Keybinding
 
@@ -125,42 +135,37 @@ keybinds {
 
 ### tmux
 
-For tmux, set the focus command in config or environment:
+For tmux, set the focus command via environment or CLI flag:
 
 ```bash
 export TAEL_FOCUS_CMD="tmux select-pane -t {pane_id}"
 ```
 
-Or in `~/.config/tael/config.toml`:
+Or pass directly:
 
-```toml
-focus_command = "tmux select-pane -t {pane_id}"
+```bash
+tael --focus-cmd "tmux select-pane -t {pane_id}"
 ```
 
 ## Configuration
 
-Config file: `~/.config/tael/config.toml`
+tael is configured entirely via CLI flags and environment variables (no config files).
 
-```toml
-# Command to focus a pane. Use {pane_id} as placeholder.
-# Auto-detected for Zellij and tmux if not set.
-focus_command = "zellij action focus-pane-with-id {pane_id}"
+| Flag | Env Variable | Description |
+|------|--------------|-------------|
+| `--focus-cmd` | `TAEL_FOCUS_CMD` | Command to focus a pane (use `{pane_id}` placeholder) |
+| `-f, --file` | `TAEL_INBOX_FILE` | Override inbox file path |
+| `--group-by` | - | Group items by attribute (e.g., `status,proj`) |
 
-# Checkbox style: "brackets", "circles", "bullets", or "none"
-checkbox_style = "brackets"
-
-# Enable ANSI colors
-colors = true
-```
+Focus command is auto-detected for Zellij and tmux if not specified.
 
 ## Environment Variables
 
 | Variable | Description |
 |----------|-------------|
-| `TAEL_INBOX_FILE` | Override inbox file path |
-| `TAEL_FOCUS_CMD` | Override focus command |
-| `ZELLIJ_PANE_ID` | Auto-used for pane ID in Zellij |
-| `ZELLIJ_SESSION_NAME` | Used for inbox file naming |
+| `ZELLIJ_PANE_ID` | Auto-used for pane ID in Zellij hooks |
+| `ZELLIJ_SESSION_NAME` | Used for per-session inbox file naming |
+| `TMUX` | Detected for tmux focus command auto-config |
 
 ## How It Works
 
