@@ -130,16 +130,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if json {
                 println!("{}", serde_json::to_string_pretty(&inbox)?);
             } else {
-                // Use TUI render with terminal width
-                let width = crossterm::terminal::size().map(|(w, _)| w as usize).unwrap_or(80);
+                let width = ratatui::crossterm::terminal::size()
+                    .map(|(w, _)| w as usize)
+                    .unwrap_or(80);
                 let is_tty = std::io::stdout().is_terminal();
-                let opts = tael::tui::RenderOptions {
-                    width,
-                    height: 1000, // no height limit for list
-                    checkbox_style: config.checkbox_style.parse().unwrap_or_default(),
-                    colors: config.colors && is_tty,
-                };
-                print!("{}", tael::tui::render(&inbox, 0, &opts));
+                print!("{}", tael::tui::render_list(&inbox, width, config.colors && is_tty));
             }
         }
 

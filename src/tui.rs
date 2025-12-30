@@ -1,348 +1,308 @@
-//! TUI rendering for tael
+//! TUI rendering for tael using ratatui
 //!
-//! Provides both stateless rendering functions and interactive TUI mode.
+//! Provides an inline viewport TUI that doesn't take over the terminal.
 
-use std::io::{self, Write};
-use std::str::FromStr;
+use std::io::{self, stdout};
 
-use crossterm::{
-    cursor,
-    event::{self, Event, KeyCode, KeyModifiers},
-    execute,
-    terminal::{self, ClearType},
+use ratatui::{
+    crossterm::event::{self, Event, KeyCode, KeyModifiers},
+    layout::{Constraint, Layout},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    Frame, Terminal, TerminalOptions, Viewport,
 };
 
 use crate::config::Config;
 use crate::{Inbox, Status};
 
-/// Unicode characters for TUI elements
-pub mod chars {
-    pub const SELECTED: char = '▶';
-    pub const ELLIPSIS: char = '…';
+/// Height of the inline TUI (title + hints + separator + content + bottom border)
+const TUI_HEIGHT: u16 = 12;
 
-    // Checkbox styles
-    pub const CHECKBOX_EMPTY: &str = "[ ]";
-    pub const CIRCLE_EMPTY: &str = "○";
-    pub const BULLET: &str = "•";
-}
-
-/// ANSI escape codes for styling
-pub mod ansi {
-    pub const RESET: &str = "\x1b[0m";
-    pub const BOLD: &str = "\x1b[1m";
-    pub const DIM: &str = "\x1b[2m";
-
-    // Colors
-    pub const CYAN: &str = "\x1b[36m";
-    pub const YELLOW: &str = "\x1b[33m";
-    pub const GREEN: &str = "\x1b[32m";
-    pub const MAGENTA: &str = "\x1b[35m";
-}
-
-/// Style for checkbox/bullet indicators
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum CheckboxStyle {
-    #[default]
-    Brackets,
-    Circles,
-    Bullets,
-    None,
-}
-
-impl FromStr for CheckboxStyle {
-    type Err = std::convert::Infallible;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s.to_lowercase().as_str() {
-            "circles" | "circle" | "dots" => Self::Circles,
-            "bullets" | "bullet" => Self::Bullets,
-            "none" | "off" => Self::None,
-            _ => Self::Brackets,
-        })
-    }
-}
-
-impl CheckboxStyle {
-    pub fn indicator(&self) -> &'static str {
-        match self {
-            Self::Brackets => chars::CHECKBOX_EMPTY,
-            Self::Circles => chars::CIRCLE_EMPTY,
-            Self::Bullets => chars::BULLET,
-            Self::None => "",
-        }
-    }
-}
-
-/// Render options for the TUI
-#[derive(Debug, Clone)]
-pub struct RenderOptions {
-    pub width: usize,
-    pub height: usize,
-    pub checkbox_style: CheckboxStyle,
-    pub colors: bool,
-}
-
-impl Default for RenderOptions {
-    fn default() -> Self {
-        Self {
-            width: 50,
-            height: 20,
-            checkbox_style: CheckboxStyle::default(),
-            colors: true,
-        }
-    }
-}
-
-/// Render the inbox TUI to a string buffer
-pub fn render(inbox: &Inbox, selected: usize, opts: &RenderOptions) -> String {
-    let mut output = String::new();
-    let width = opts.width.max(20);
-    let height = opts.height.max(3);
-    let content_height = height.saturating_sub(2);
-
-    // Title
-    if opts.colors {
-        output.push_str(ansi::BOLD);
-        output.push_str(ansi::CYAN);
-    }
-    output.push_str("Tael - Agent Inbox");
-    if opts.colors {
-        output.push_str(ansi::RESET);
-    }
-    output.push('\n');
-
-    if inbox.is_empty() {
-        if opts.colors {
-            output.push_str(ansi::DIM);
-        }
-        output.push_str("  (no items)");
-        if opts.colors {
-            output.push_str(ansi::RESET);
-        }
-        output.push('\n');
-    } else {
-        let overflow = render_items(&mut output, inbox, selected, width, content_height, opts);
-        if overflow {
-            if opts.colors {
-                output.push_str(ansi::DIM);
-            }
-            output.push_str(&format!("  {} more below", chars::ELLIPSIS));
-            if opts.colors {
-                output.push_str(ansi::RESET);
-            }
-            output.push('\n');
-        }
-    }
-
-    // Footer
-    if opts.colors {
-        output.push_str(ansi::DIM);
-    }
-    output.push_str("j/k:nav  Enter:focus  q:quit");
-    if opts.colors {
-        output.push_str(ansi::RESET);
-    }
-    output.push('\n');
-
-    output
-}
-
-fn render_items(
-    output: &mut String,
-    inbox: &Inbox,
-    selected: usize,
-    width: usize,
-    max_lines: usize,
-    opts: &RenderOptions,
-) -> bool {
-    let mut lines_used = 0;
-    let mut current_status: Option<Status> = None;
-    let mut current_project: Option<&str> = None;
-    let mut truncated = false;
-
-    for (idx, item) in inbox.items.iter().enumerate() {
-        let need_section = current_status != Some(item.status);
-        let need_project = current_project != Some(&item.project);
-        let lines_needed = 1 + if need_section { 1 } else { 0 } + if need_project { 1 } else { 0 };
-
-        if lines_used + lines_needed > max_lines.saturating_sub(1) && idx < inbox.items.len() - 1 {
-            truncated = true;
-            break;
-        }
-
-        // Section header
-        if need_section {
-            current_status = Some(item.status);
-            current_project = None;
-            if opts.colors {
-                output.push_str(ansi::BOLD);
-                output.push_str(ansi::YELLOW);
-            }
-            output.push_str(item.status.section_name());
-            if opts.colors {
-                output.push_str(ansi::RESET);
-            }
-            output.push('\n');
-            lines_used += 1;
-        }
-
-        // Project header
-        if need_project {
-            current_project = Some(&item.project);
-            output.push_str("  ");
-            if opts.colors {
-                output.push_str(ansi::MAGENTA);
-            }
-            let proj_header = match &item.branch {
-                Some(branch) => format!("{} ({})", item.project, branch),
-                None => item.project.clone(),
-            };
-            let max_proj_len = width.saturating_sub(4);
-            let proj: String = proj_header.chars().take(max_proj_len).collect();
-            output.push_str(&proj);
-            if opts.colors {
-                output.push_str(ansi::RESET);
-            }
-            output.push('\n');
-            lines_used += 1;
-        }
-
-        // Item line
-        output.push_str("    ");
-        let is_selected = idx == selected;
-
-        if is_selected {
-            if opts.colors {
-                output.push_str(ansi::GREEN);
-            }
-            output.push(chars::SELECTED);
-            if opts.colors {
-                output.push_str(ansi::RESET);
-            }
-        } else {
-            output.push(' ');
-        }
-        output.push(' ');
-
-        let indicator = opts.checkbox_style.indicator();
-        output.push_str(indicator);
-        if !indicator.is_empty() {
-            output.push(' ');
-        }
-
-        let prefix_len = 6 + indicator.len() + 1;
-        let max_text_len = width.saturating_sub(prefix_len);
-        let text: String = item.text.chars().take(max_text_len).collect();
-        output.push_str(&text);
-        output.push('\n');
-        lines_used += 1;
-    }
-
-    truncated
-}
-
-/// Run interactive TUI mode
+/// Run interactive TUI mode with inline viewport
 pub fn run_interactive(config: &Config) -> io::Result<()> {
     let path = crate::file::default_path();
-    let mut inbox = crate::file::load(&path)?;
-    let mut selected: usize = 0;
+    let inbox = crate::file::load(&path)?;
 
-    // Enter raw mode
-    terminal::enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, terminal::EnterAlternateScreen, cursor::Hide)?;
+    // Calculate actual height needed
+    let item_count = inbox.items.len();
+    let height = (item_count as u16 + 5).min(TUI_HEIGHT).max(6); // min 6 for empty state
 
-    let result = run_loop(&mut stdout, &mut inbox, &mut selected, config, &path);
+    // Create terminal with inline viewport
+    let backend = ratatui::backend::CrosstermBackend::new(stdout());
+    let options = TerminalOptions {
+        viewport: Viewport::Inline(height),
+    };
+    let mut terminal = Terminal::with_options(backend, options)?;
 
-    // Cleanup
-    execute!(stdout, cursor::Show, terminal::LeaveAlternateScreen)?;
-    terminal::disable_raw_mode()?;
+    let result = run_app(&mut terminal, inbox, config, &path);
+
+    // Print newline after TUI exits to avoid prompt overlap
+    println!();
 
     result
 }
 
-fn run_loop(
-    stdout: &mut io::Stdout,
-    inbox: &mut Inbox,
-    selected: &mut usize,
+struct App {
+    inbox: Inbox,
+    list_state: ListState,
+    path: std::path::PathBuf,
+}
+
+impl App {
+    fn new(inbox: Inbox, path: std::path::PathBuf) -> Self {
+        let mut list_state = ListState::default();
+        if !inbox.is_empty() {
+            list_state.select(Some(0));
+        }
+        Self { inbox, list_state, path }
+    }
+
+    fn next(&mut self) {
+        if self.inbox.is_empty() {
+            return;
+        }
+        let i = match self.list_state.selected() {
+            Some(i) => (i + 1).min(self.inbox.items.len() - 1),
+            None => 0,
+        };
+        self.list_state.select(Some(i));
+    }
+
+    fn previous(&mut self) {
+        if self.inbox.is_empty() {
+            return;
+        }
+        let i = match self.list_state.selected() {
+            Some(i) => i.saturating_sub(1),
+            None => 0,
+        };
+        self.list_state.select(Some(i));
+    }
+
+    fn selected_pane_id(&self) -> Option<u32> {
+        self.list_state
+            .selected()
+            .and_then(|i| self.inbox.items.get(i))
+            .map(|item| item.pane_id)
+    }
+
+    fn delete_selected(&mut self) {
+        if let Some(pane_id) = self.selected_pane_id() {
+            self.inbox.remove(pane_id);
+            let _ = crate::file::save(&self.path, &self.inbox);
+            // Adjust selection
+            if let Some(i) = self.list_state.selected() {
+                if i >= self.inbox.items.len() && !self.inbox.is_empty() {
+                    self.list_state.select(Some(self.inbox.items.len() - 1));
+                } else if self.inbox.is_empty() {
+                    self.list_state.select(None);
+                }
+            }
+        }
+    }
+
+    fn reload(&mut self) {
+        if let Ok(inbox) = crate::file::load(&self.path) {
+            self.inbox = inbox;
+            if let Some(i) = self.list_state.selected() {
+                if i >= self.inbox.items.len() {
+                    self.list_state.select(if self.inbox.is_empty() {
+                        None
+                    } else {
+                        Some(self.inbox.items.len() - 1)
+                    });
+                }
+            }
+        }
+    }
+}
+
+fn run_app(
+    terminal: &mut Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>,
+    inbox: Inbox,
     config: &Config,
     path: &std::path::Path,
 ) -> io::Result<()> {
+    let mut app = App::new(inbox, path.to_path_buf());
+
     loop {
-        // Get terminal size
-        let (width, height) = terminal::size()?;
-        let opts = RenderOptions {
-            width: width as usize,
-            height: height as usize,
-            checkbox_style: config.checkbox_style.parse().unwrap_or_default(),
-            colors: config.colors,
-        };
+        terminal.draw(|frame| draw(frame, &mut app))?;
 
-        // Render
-        execute!(stdout, terminal::Clear(ClearType::All), cursor::MoveTo(0, 0))?;
-        let output = render(inbox, *selected, &opts);
-        write!(stdout, "{}", output)?;
-        stdout.flush()?;
-
-        // Handle input
         if let Event::Key(key) = event::read()? {
             match (key.code, key.modifiers) {
                 (KeyCode::Char('q'), _) | (KeyCode::Esc, _) => break,
                 (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
-
-                (KeyCode::Char('j'), _) | (KeyCode::Down, _) => {
-                    if !inbox.is_empty() && *selected < inbox.items.len() - 1 {
-                        *selected += 1;
-                    }
-                }
-
-                (KeyCode::Char('k'), _) | (KeyCode::Up, _) => {
-                    if *selected > 0 {
-                        *selected -= 1;
-                    }
-                }
-
+                (KeyCode::Char('j'), _) | (KeyCode::Down, _) => app.next(),
+                (KeyCode::Char('k'), _) | (KeyCode::Up, _) => app.previous(),
+                (KeyCode::Char('d'), _) => app.delete_selected(),
+                (KeyCode::Char('r'), _) => app.reload(),
                 (KeyCode::Enter, _) => {
-                    if let Some(item) = inbox.items.get(*selected) {
-                        let pane_id = item.pane_id;
-                        // Exit TUI first
-                        execute!(stdout, cursor::Show, terminal::LeaveAlternateScreen)?;
-                        terminal::disable_raw_mode()?;
-
-                        // Focus pane
-                        if let Err(e) = config.focus_pane(pane_id) {
-                            eprintln!("Failed to focus pane: {}", e);
-                        }
-                        return Ok(());
+                    if let Some(pane_id) = app.selected_pane_id() {
+                        // Return pane_id to focus after TUI cleanup
+                        return focus_pane_after_exit(config, pane_id);
                     }
                 }
-
-                (KeyCode::Char('r'), _) => {
-                    // Reload inbox
-                    *inbox = crate::file::load(path)?;
-                    if *selected >= inbox.items.len() {
-                        *selected = inbox.items.len().saturating_sub(1);
-                    }
-                }
-
-                (KeyCode::Char('d'), _) => {
-                    // Delete selected item
-                    if let Some(item) = inbox.items.get(*selected) {
-                        let pane_id = item.pane_id;
-                        inbox.remove(pane_id);
-                        crate::file::save(path, inbox)?;
-                        if *selected >= inbox.items.len() {
-                            *selected = inbox.items.len().saturating_sub(1);
-                        }
-                    }
-                }
-
                 _ => {}
             }
         }
     }
 
     Ok(())
+}
+
+fn focus_pane_after_exit(config: &Config, pane_id: u32) -> io::Result<()> {
+    let _ = config.focus_pane(pane_id);
+    Ok(())
+}
+
+fn draw(frame: &mut Frame, app: &mut App) {
+    let area = frame.area();
+
+    // Main block with title
+    let block = Block::default()
+        .title(" Tael ")
+        .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Split inner area: hints (1 line) + separator (1 line) + content
+    let chunks = Layout::vertical([
+        Constraint::Length(1), // hints
+        Constraint::Length(1), // separator line
+        Constraint::Min(1),    // content
+    ])
+    .split(inner);
+
+    // Hints line
+    let hints = Line::from(vec![
+        Span::styled("j/k", Style::default().fg(Color::Yellow)),
+        Span::raw(":nav  "),
+        Span::styled("Enter", Style::default().fg(Color::Yellow)),
+        Span::raw(":focus  "),
+        Span::styled("d", Style::default().fg(Color::Yellow)),
+        Span::raw(":del  "),
+        Span::styled("r", Style::default().fg(Color::Yellow)),
+        Span::raw(":reload  "),
+        Span::styled("q", Style::default().fg(Color::Yellow)),
+        Span::raw(":quit"),
+    ]);
+    frame.render_widget(Paragraph::new(hints).style(Style::default().fg(Color::DarkGray)), chunks[0]);
+
+    // Separator
+    let sep = "─".repeat(chunks[1].width as usize);
+    frame.render_widget(
+        Paragraph::new(sep).style(Style::default().fg(Color::DarkGray)),
+        chunks[1],
+    );
+
+    // Content area
+    if app.inbox.is_empty() {
+        let empty = Paragraph::new("  (no items)")
+            .style(Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC));
+        frame.render_widget(empty, chunks[2]);
+    } else {
+        // Build list items with section headers inline
+        let items = build_list_items(&app.inbox);
+        let list = List::new(items)
+            .highlight_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+            .highlight_symbol("▶ ");
+        frame.render_stateful_widget(list, chunks[2], &mut app.list_state);
+    }
+}
+
+fn build_list_items(inbox: &Inbox) -> Vec<ListItem<'static>> {
+    let mut items = Vec::new();
+    let mut current_status: Option<Status> = None;
+    let mut current_project: Option<String> = None;
+
+    for item in &inbox.items {
+        // Section header (status change)
+        if current_status != Some(item.status) {
+            current_status = Some(item.status);
+            current_project = None;
+            let section = Line::from(Span::styled(
+                item.status.section_name(),
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            ));
+            items.push(ListItem::new(section));
+        }
+
+        // Project header
+        let proj_key = match &item.branch {
+            Some(b) => format!("{} ({})", item.project, b),
+            None => item.project.clone(),
+        };
+        if current_project.as_ref() != Some(&proj_key) {
+            current_project = Some(proj_key.clone());
+            let proj_line = Line::from(Span::styled(
+                format!("  {}", proj_key),
+                Style::default().fg(Color::Magenta),
+            ));
+            items.push(ListItem::new(proj_line));
+        }
+
+        // Item line
+        let item_line = Line::from(format!("    [ ] {}", item.text));
+        items.push(ListItem::new(item_line));
+    }
+
+    items
+}
+
+/// Render inbox for non-interactive list output (respects terminal width)
+pub fn render_list(inbox: &Inbox, width: usize, colors: bool) -> String {
+    let mut output = String::new();
+
+    if inbox.is_empty() {
+        if colors {
+            output.push_str("\x1b[2m(no items)\x1b[0m\n");
+        } else {
+            output.push_str("(no items)\n");
+        }
+        return output;
+    }
+
+    let mut current_status: Option<Status> = None;
+    let mut current_project: Option<String> = None;
+
+    for (idx, item) in inbox.items.iter().enumerate() {
+        // Section header
+        if current_status != Some(item.status) {
+            current_status = Some(item.status);
+            current_project = None;
+            if colors {
+                output.push_str(&format!("\x1b[1;33m{}\x1b[0m\n", item.status.section_name()));
+            } else {
+                output.push_str(&format!("{}\n", item.status.section_name()));
+            }
+        }
+
+        // Project header
+        let proj_key = match &item.branch {
+            Some(b) => format!("{} ({})", item.project, b),
+            None => item.project.clone(),
+        };
+        if current_project.as_ref() != Some(&proj_key) {
+            current_project = Some(proj_key.clone());
+            if colors {
+                output.push_str(&format!("  \x1b[35m{}\x1b[0m\n", proj_key));
+            } else {
+                output.push_str(&format!("  {}\n", proj_key));
+            }
+        }
+
+        // Item with truncation
+        let prefix = if idx == 0 { "  ▶ [ ] " } else { "    [ ] " };
+        let max_len = width.saturating_sub(prefix.len());
+        let text: String = item.text.chars().take(max_len).collect();
+        output.push_str(&format!("{}{}\n", prefix, text));
+    }
+
+    output
 }
 
 #[cfg(test)]
@@ -354,17 +314,17 @@ mod tests {
         Inbox {
             items: vec![
                 InboxItem {
-                    text: "claude-code: Auth question".to_string(),
+                    text: "claude: Auth question".to_string(),
                     pane_id: 42,
                     project: "crucible".to_string(),
                     branch: None,
                     status: Status::Waiting,
                 },
                 InboxItem {
-                    text: "claude-code: Review PR".to_string(),
+                    text: "claude: Review PR".to_string(),
                     pane_id: 17,
-                    project: "k3s".to_string(),
-                    branch: None,
+                    project: "tael".to_string(),
+                    branch: Some("master".to_string()),
                     status: Status::Waiting,
                 },
             ],
@@ -372,51 +332,25 @@ mod tests {
     }
 
     #[test]
-    fn render_empty_inbox() {
+    fn render_list_empty() {
         let inbox = Inbox::new();
-        let opts = RenderOptions {
-            colors: false,
-            ..Default::default()
-        };
-        let output = render(&inbox, 0, &opts);
-
-        assert!(output.contains("Tael"));
+        let output = render_list(&inbox, 80, false);
         assert!(output.contains("(no items)"));
     }
 
     #[test]
-    fn render_with_items() {
+    fn render_list_with_items() {
         let inbox = sample_inbox();
-        let opts = RenderOptions {
-            colors: false,
-            ..Default::default()
-        };
-        let output = render(&inbox, 0, &opts);
-
+        let output = render_list(&inbox, 80, false);
         assert!(output.contains("Waiting for Input"));
         assert!(output.contains("crucible"));
         assert!(output.contains("Auth question"));
     }
 
     #[test]
-    fn render_selection_marker() {
+    fn render_list_with_branch() {
         let inbox = sample_inbox();
-        let opts = RenderOptions {
-            colors: false,
-            ..Default::default()
-        };
-
-        let output = render(&inbox, 0, &opts);
-        let lines: Vec<&str> = output.lines().collect();
-        let auth_line = lines.iter().find(|l| l.contains("Auth question")).unwrap();
-        assert!(auth_line.contains('▶'));
-    }
-
-    #[test]
-    fn checkbox_style_from_str() {
-        assert_eq!("circles".parse::<CheckboxStyle>().unwrap(), CheckboxStyle::Circles);
-        assert_eq!("bullets".parse::<CheckboxStyle>().unwrap(), CheckboxStyle::Bullets);
-        assert_eq!("none".parse::<CheckboxStyle>().unwrap(), CheckboxStyle::None);
-        assert_eq!("anything".parse::<CheckboxStyle>().unwrap(), CheckboxStyle::Brackets);
+        let output = render_list(&inbox, 80, false);
+        assert!(output.contains("tael (master)"));
     }
 }
