@@ -54,6 +54,9 @@ fn spawn_input_thread(tx: mpsc::Sender<TuiEvent>) {
 
 /// Run interactive TUI mode with inline viewport
 pub fn run_interactive(config: &Config) -> io::Result<()> {
+    use std::io::stdout;
+    use ratatui::{backend::CrosstermBackend, Terminal};
+
     let path = crate::file::default_path();
     let inbox = crate::file::load(&path)?;
 
@@ -61,19 +64,18 @@ pub fn run_interactive(config: &Config) -> io::Result<()> {
     let item_count = inbox.items.len();
     let height = (item_count as u16 + 5).min(TUI_HEIGHT).max(6); // min 6 for empty state
 
-    // Use ratatui's init_with_options for inline viewport
-    let mut terminal = ratatui::init_with_options(TerminalOptions {
+    // NO raw mode - just inline viewport
+    let backend = CrosstermBackend::new(stdout());
+    let mut terminal = Terminal::with_options(backend, TerminalOptions {
         viewport: Viewport::Inline(height),
-    });
+    })?;
 
-    // Spawn input thread (inline viewport pattern from ratatui examples)
+    // Spawn input thread
     let (tx, rx) = mpsc::channel();
     spawn_input_thread(tx);
 
     let result = run_app(&mut terminal, inbox, config, &path, rx);
 
-    // Cleanup
-    ratatui::restore();
     println!();
 
     result
