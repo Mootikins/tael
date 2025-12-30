@@ -58,7 +58,26 @@ pub fn save(path: &Path, inbox: &Inbox) -> Result<(), std::io::Error> {
 mod tests {
     use super::*;
     use crate::{InboxItem, Status};
+    use std::collections::HashMap;
     use tempfile::TempDir;
+
+    /// Helper to create an InboxItem with attrs
+    fn make_item(
+        msg: &str,
+        pane: u32,
+        proj: &str,
+        branch: Option<&str>,
+        status: Status,
+    ) -> InboxItem {
+        let mut attrs = HashMap::new();
+        attrs.insert("msg".to_string(), msg.to_string());
+        attrs.insert("pane".to_string(), pane.to_string());
+        attrs.insert("proj".to_string(), proj.to_string());
+        if let Some(b) = branch {
+            attrs.insert("branch".to_string(), b.to_string());
+        }
+        InboxItem { attrs, status }
+    }
 
     #[test]
     fn load_nonexistent_returns_empty() {
@@ -74,20 +93,20 @@ mod tests {
         let path = dir.path().join("test.md");
 
         let mut inbox = Inbox::new();
-        inbox.upsert(InboxItem {
-            text: "claude-code: Test".to_string(),
-            pane_id: 42,
-            project: "test-project".to_string(),
-            branch: None,
-            status: Status::Waiting,
-        });
+        inbox.upsert(make_item(
+            "claude-code: Test",
+            42,
+            "test-project",
+            None,
+            Status::Waiting,
+        ));
 
         save(&path, &inbox).unwrap();
         assert!(path.exists());
 
         let loaded = load(&path).unwrap();
         assert_eq!(loaded.items.len(), 1);
-        assert_eq!(loaded.items[0].pane_id, 42);
+        assert_eq!(loaded.items[0].pane_id(), Some(42));
     }
 
     #[test]
