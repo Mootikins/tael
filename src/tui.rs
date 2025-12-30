@@ -3,9 +3,13 @@
 //! Provides an inline viewport TUI that doesn't take over the terminal.
 
 use std::io;
+use std::time::Duration;
 
 use ratatui::{
-    crossterm::event::{self, Event, KeyCode, KeyModifiers},
+    crossterm::{
+        event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+        terminal::{disable_raw_mode, enable_raw_mode, is_raw_mode_enabled},
+    },
     layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -28,15 +32,23 @@ pub fn run_interactive(config: &Config) -> io::Result<()> {
     let item_count = inbox.items.len();
     let height = (item_count as u16 + 5).min(TUI_HEIGHT).max(6); // min 6 for empty state
 
-    // Use ratatui's init_with_options which handles raw mode automatically
+    // Use ratatui's init_with_options which should handle raw mode
     let mut terminal = ratatui::init_with_options(TerminalOptions {
         viewport: Viewport::Inline(height),
     });
+
+    // Verify raw mode is enabled - enable manually if not
+    if !is_raw_mode_enabled().unwrap_or(false) {
+        enable_raw_mode()?;
+    }
 
     let result = run_app(&mut terminal, inbox, config, &path);
 
     // Restore terminal state (disables raw mode, etc.)
     ratatui::restore();
+
+    // Extra safety: ensure raw mode is disabled
+    let _ = disable_raw_mode();
     println!();
 
     result
@@ -128,21 +140,28 @@ fn run_app(
     loop {
         terminal.draw(|frame| draw(frame, &mut app))?;
 
-        if let Event::Key(key) = event::read()? {
-            match (key.code, key.modifiers) {
-                (KeyCode::Char('q'), _) | (KeyCode::Esc, _) => break,
-                (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
-                (KeyCode::Char('j'), _) | (KeyCode::Down, _) => app.next(),
-                (KeyCode::Char('k'), _) | (KeyCode::Up, _) => app.previous(),
-                (KeyCode::Char('d'), _) => app.delete_selected(),
-                (KeyCode::Char('r'), _) => app.reload(),
-                (KeyCode::Enter, _) => {
-                    if let Some(pane_id) = app.selected_pane_id() {
-                        // Return pane_id to focus after TUI cleanup
-                        return focus_pane_after_exit(config, pane_id);
-                    }
+        // Poll for events with timeout (like ratatui examples)
+        if event::poll(Duration::from_millis(100))? {
+            if let Event::Key(key) = event::read()? {
+                // Only process key press events, not release
+                if key.kind != KeyEventKind::Press {
+                    continue;
                 }
-                _ => {}
+                match (key.code, key.modifiers) {
+                    (KeyCode::Char('q'), _) | (KeyCode::Esc, _) => break,
+                    (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
+                    (KeyCode::Char('j'), _) | (KeyCode::Down, _) => app.next(),
+                    (KeyCode::Char('k'), _) | (KeyCode::Up, _) => app.previous(),
+                    (KeyCode::Char('d'), _) => app.delete_selected(),
+                    (KeyCode::Char('r'), _) => app.reload(),
+                    (KeyCode::Enter, _) => {
+                        if let Some(pane_id) = app.selected_pane_id() {
+                            // Return pane_id to focus after TUI cleanup
+                            return focus_pane_after_exit(config, pane_id);
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
     }
