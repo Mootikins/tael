@@ -1,14 +1,10 @@
 //! TUI rendering for tael using ratatui
-//!
-//! Provides an inline viewport TUI that doesn't take over the terminal.
 
 use std::io;
-use std::sync::mpsc;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use ratatui::{
-    crossterm::event::{self, KeyCode, KeyEventKind, KeyModifiers},
+    crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -19,54 +15,47 @@ use ratatui::{
 use crate::config::Config;
 use crate::{Inbox, Status};
 
-/// Events for the TUI
-enum TuiEvent {
-    Key(event::KeyEvent),
-    Tick,
-}
-
-/// Spawn input handling thread (required for inline viewport)
-fn spawn_input_thread(tx: mpsc::Sender<TuiEvent>) {
-    let tick_rate = Duration::from_millis(200);
-    thread::spawn(move || {
-        let mut last_tick = Instant::now();
-        loop {
-            let timeout = tick_rate.saturating_sub(last_tick.elapsed());
-            if event::poll(timeout).unwrap_or(false) {
-                if let Ok(event::Event::Key(key)) = event::read() {
-                    if tx.send(TuiEvent::Key(key)).is_err() {
-                        break;
-                    }
-                }
-            }
-            if last_tick.elapsed() >= tick_rate {
-                if tx.send(TuiEvent::Tick).is_err() {
-                    break;
-                }
-                last_tick = Instant::now();
-            }
-        }
-    });
-}
-
-/// Run interactive TUI mode (fullscreen with alternate screen)
+/// Run interactive TUI mode
 pub fn run_interactive(config: &Config) -> io::Result<()> {
     let path = crate::file::default_path();
     let inbox = crate::file::load(&path)?;
 
-    // Use standard ratatui init (alternate screen + raw mode)
+    // Standard ratatui init
     let mut terminal = ratatui::init();
+    let mut app = App::new(inbox, path.to_path_buf());
 
-    // Spawn input thread
-    let (tx, rx) = mpsc::channel();
-    spawn_input_thread(tx);
+    // Simple event loop - no threading
+    loop {
+        terminal.draw(|frame| draw(frame, &mut app))?;
 
-    let result = run_app(&mut terminal, inbox, config, &path, rx);
+        // Poll with timeout
+        if event::poll(Duration::from_millis(100))? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind != KeyEventKind::Press {
+                    continue;
+                }
+                match (key.code, key.modifiers) {
+                    (KeyCode::Char('q'), _) | (KeyCode::Esc, _) => break,
+                    (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
+                    (KeyCode::Char('j'), _) | (KeyCode::Down, _) => app.next(),
+                    (KeyCode::Char('k'), _) | (KeyCode::Up, _) => app.previous(),
+                    (KeyCode::Char('d'), _) => app.delete_selected(),
+                    (KeyCode::Char('r'), _) => app.reload(),
+                    (KeyCode::Enter, _) => {
+                        if let Some(pane_id) = app.selected_pane_id() {
+                            ratatui::restore();
+                            let _ = config.focus_pane(pane_id);
+                            return Ok(());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
 
-    // Restore terminal
     ratatui::restore();
-
-    result
+    Ok(())
 }
 
 struct App {
@@ -142,56 +131,6 @@ impl App {
             }
         }
     }
-}
-
-fn run_app(
-    terminal: &mut ratatui::DefaultTerminal,
-    inbox: Inbox,
-    config: &Config,
-    path: &std::path::Path,
-    rx: mpsc::Receiver<TuiEvent>,
-) -> io::Result<()> {
-    let mut app = App::new(inbox, path.to_path_buf());
-
-    loop {
-        terminal.draw(|frame| draw(frame, &mut app))?;
-
-        // Receive events from input thread
-        match rx.recv() {
-            Ok(TuiEvent::Key(key)) => {
-                // Only process key press events, not release
-                if key.kind != KeyEventKind::Press {
-                    continue;
-                }
-                match (key.code, key.modifiers) {
-                    (KeyCode::Char('q'), _) | (KeyCode::Esc, _) => break,
-                    (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
-                    (KeyCode::Char('j'), _) | (KeyCode::Down, _) => app.next(),
-                    (KeyCode::Char('k'), _) | (KeyCode::Up, _) => app.previous(),
-                    (KeyCode::Char('d'), _) => app.delete_selected(),
-                    (KeyCode::Char('r'), _) => app.reload(),
-                    (KeyCode::Enter, _) => {
-                        if let Some(pane_id) = app.selected_pane_id() {
-                            // Return pane_id to focus after TUI cleanup
-                            return focus_pane_after_exit(config, pane_id);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            Ok(TuiEvent::Tick) => {
-                // Tick - could refresh inbox here if needed
-            }
-            Err(_) => break, // Channel closed
-        }
-    }
-
-    Ok(())
-}
-
-fn focus_pane_after_exit(config: &Config, pane_id: u32) -> io::Result<()> {
-    let _ = config.focus_pane(pane_id);
-    Ok(())
 }
 
 fn draw(frame: &mut Frame, app: &mut App) {
