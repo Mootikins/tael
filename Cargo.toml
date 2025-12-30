@@ -1,9 +1,11 @@
 [package]
 name = "tael"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Terminal-agnostic agent inbox TUI - track AI assistant status across panes"
 license = "MIT"
+repository = "https://github.com/Mootikins/tael"
+readme = "README.md"
 keywords = ["cli", "tui", "agent", "terminal", "multiplexer"]
 categories = ["command-line-utilities"]
 

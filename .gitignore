@@ -1,2 +1,8 @@
 target/
 Cargo.lock
+
+# Local
+.claude/
+thoughts/
+plugins/
+*.txt

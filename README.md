@@ -62,6 +62,10 @@ tael remove -a pane=42
 
 # Clear all
 tael clear
+
+# Launch TUI in a floating pane (Zellij only)
+tael float
+tael float -p bottom-left --width 40% --height 60%
 ```
 
 ### TUI Keybindings
@@ -72,6 +76,7 @@ tael clear
 | `k` / `↑` | Move up |
 | `Enter` | Focus pane (jump to it) |
 | `d` | Delete selected item |
+| `p` | Pin floating pane (Zellij only) |
 | `r` | Reload inbox |
 | `q` / `Esc` | Quit |
 
