@@ -11,3 +11,6 @@ pub mod tui;
 pub mod types;
 
 pub use types::{Inbox, InboxItem, Status};
+
+#[cfg(test)]
+pub use types::test_utils;

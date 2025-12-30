@@ -128,6 +128,30 @@ impl Inbox {
     }
 }
 
+/// Test utilities (available to other modules via pub use)
+#[cfg(test)]
+pub mod test_utils {
+    use super::*;
+
+    /// Helper to create an InboxItem with common attrs
+    pub fn make_item(
+        msg: &str,
+        pane: u32,
+        proj: &str,
+        branch: Option<&str>,
+        status: Status,
+    ) -> InboxItem {
+        let mut attrs = HashMap::new();
+        attrs.insert("msg".to_string(), msg.to_string());
+        attrs.insert("pane".to_string(), pane.to_string());
+        attrs.insert("proj".to_string(), proj.to_string());
+        if let Some(b) = branch {
+            attrs.insert("branch".to_string(), b.to_string());
+        }
+        InboxItem { attrs, status }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
