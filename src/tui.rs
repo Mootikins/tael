@@ -5,7 +5,10 @@
 use std::io::{self, stdout};
 
 use ratatui::{
-    crossterm::event::{self, Event, KeyCode, KeyModifiers},
+    crossterm::{
+        event::{self, Event, KeyCode, KeyModifiers},
+        terminal::{disable_raw_mode, enable_raw_mode},
+    },
     layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -28,6 +31,9 @@ pub fn run_interactive(config: &Config) -> io::Result<()> {
     let item_count = inbox.items.len();
     let height = (item_count as u16 + 5).min(TUI_HEIGHT).max(6); // min 6 for empty state
 
+    // Enable raw mode for keyboard input
+    enable_raw_mode()?;
+
     // Create terminal with inline viewport
     let backend = ratatui::backend::CrosstermBackend::new(stdout());
     let options = TerminalOptions {
@@ -37,7 +43,8 @@ pub fn run_interactive(config: &Config) -> io::Result<()> {
 
     let result = run_app(&mut terminal, inbox, config, &path);
 
-    // Print newline after TUI exits to avoid prompt overlap
+    // Disable raw mode and print newline after TUI exits
+    disable_raw_mode()?;
     println!();
 
     result
