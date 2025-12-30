@@ -12,15 +12,12 @@ use ratatui::{
     layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
-    Frame, TerminalOptions, Viewport,
+    widgets::{List, ListItem, ListState, Paragraph},
+    Frame,
 };
 
 use crate::config::Config;
 use crate::{Inbox, Status};
-
-/// Height of the inline TUI (title + hints + separator + content + bottom border)
-const TUI_HEIGHT: u16 = 12;
 
 /// Events for the TUI
 enum TuiEvent {
@@ -52,23 +49,13 @@ fn spawn_input_thread(tx: mpsc::Sender<TuiEvent>) {
     });
 }
 
-/// Run interactive TUI mode with inline viewport
+/// Run interactive TUI mode (fullscreen with alternate screen)
 pub fn run_interactive(config: &Config) -> io::Result<()> {
-    use std::io::stdout;
-    use ratatui::{backend::CrosstermBackend, Terminal};
-
     let path = crate::file::default_path();
     let inbox = crate::file::load(&path)?;
 
-    // Calculate actual height needed
-    let item_count = inbox.items.len();
-    let height = (item_count as u16 + 5).min(TUI_HEIGHT).max(6); // min 6 for empty state
-
-    // NO raw mode - just inline viewport
-    let backend = CrosstermBackend::new(stdout());
-    let mut terminal = Terminal::with_options(backend, TerminalOptions {
-        viewport: Viewport::Inline(height),
-    })?;
+    // Use standard ratatui init (alternate screen + raw mode)
+    let mut terminal = ratatui::init();
 
     // Spawn input thread
     let (tx, rx) = mpsc::channel();
@@ -76,7 +63,8 @@ pub fn run_interactive(config: &Config) -> io::Result<()> {
 
     let result = run_app(&mut terminal, inbox, config, &path, rx);
 
-    println!();
+    // Restore terminal
+    ratatui::restore();
 
     result
 }
@@ -209,23 +197,13 @@ fn focus_pane_after_exit(config: &Config, pane_id: u32) -> io::Result<()> {
 fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
-    // Main block with title
-    let block = Block::default()
-        .title(" Tael ")
-        .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray));
-
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    // Split inner area: hints (1 line) + separator (1 line) + content
+    // Split area: hints (1 line) + separator (1 line) + content
     let chunks = Layout::vertical([
         Constraint::Length(1), // hints
         Constraint::Length(1), // separator line
         Constraint::Min(1),    // content
     ])
-    .split(inner);
+    .split(area);
 
     // Hints line
     let hints = Line::from(vec![
