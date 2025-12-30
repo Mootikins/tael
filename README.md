@@ -1,18 +1,14 @@
-<p align="center">
-  <img src="assets/mascot.png" alt="tael mascot" width="160">
-</p>
-
-<h1 align="center">tael</h1>
-
-<p align="center">
-  <strong>T</strong>erminal-<strong>A</strong>gnostic <strong>E</strong>vent <strong>L</strong>ister
-</p>
-
-<p align="center">
-  <a href="https://github.com/moot/tael/actions/workflows/ci.yml"><img src="https://github.com/moot/tael/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://crates.io/crates/tael"><img src="https://img.shields.io/crates/v/tael.svg" alt="Crates.io"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
-</p>
+<div align="center">
+<table><tr><td valign="middle">
+<img src="assets/mascot.png" alt="tael mascot" width="140">
+</td><td valign="middle">
+<h1>tael</h1>
+<strong>T</strong>erminal-<strong>A</strong>gnostic <strong>E</strong>vent <strong>L</strong>ister<br><br>
+<a href="https://github.com/Mootikins/tael/actions/workflows/ci.yml"><img src="https://github.com/Mootikins/tael/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+<a href="https://crates.io/crates/tael"><img src="https://img.shields.io/crates/v/tael.svg" alt="Crates.io"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+</td></tr></table>
+</div>
 
 <p align="center">
   A lightweight TUI for tracking AI agent status across terminal panes.<br>
@@ -36,7 +32,7 @@ cargo install tael
 
 Or build from source:
 ```bash
-git clone https://github.com/moot/tael
+git clone https://github.com/Mootikins/tael
 cd tael
 cargo install --path .
 ```
