@@ -14,6 +14,8 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4", features = ["derive", "env"] }
 ratatui = "0.29"
+# use-dev-tty: read from /dev/tty instead of stdin (needed for zellij Run)
+crossterm = { version = "0.28", features = ["use-dev-tty"] }
 dirs = "6"
 regex = "1"
 serde = { version = "1", features = ["derive"] }

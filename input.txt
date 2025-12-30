@@ -1,0 +1,9 @@
+┌ Tael ────────────────────────────────────────────────────────────────┐
+│j/k:nav  Enter:focus  d:del  r:reload  q:quit                         │
+│──────────────────────────────────────────────────────────────────────│
+│▶ Waiting for Input                                                   │
+│    crucible                                                          │
+│      [ ] claude: Waiting for approval                                │
+│    test                                                              │
+│      [ ] test item 1                                                 │
+└──────────────────────────────────────────────────────────────────────┘jkjkjkjkjkjkjkjkjkjkjkjkjkj
