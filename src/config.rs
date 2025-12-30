@@ -50,13 +50,14 @@ impl Config {
 
         let cmd = cmd.replace("{pane_id}", &pane_id.to_string());
 
-        // Parse and execute command
-        let parts: Vec<&str> = cmd.split_whitespace().collect();
+        // Parse command with shell-style quoting (handles spaces in arguments)
+        let parts = shell_words::split(&cmd)
+            .map_err(|e| format!("Failed to parse focus command: {}", e))?;
         if parts.is_empty() {
             return Err("Empty focus command".to_string());
         }
 
-        let status = std::process::Command::new(parts[0])
+        let status = std::process::Command::new(&parts[0])
             .args(&parts[1..])
             .status()
             .map_err(|e| format!("Failed to execute focus command: {}", e))?;

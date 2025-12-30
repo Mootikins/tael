@@ -280,10 +280,10 @@ fn get_group_value(item: &crate::InboxItem, key: &str) -> String {
     match key {
         "status" => item.status.section_name().to_string(),
         "proj" => match item.branch() {
-            Some(b) => format!("{} ({})", item.proj().unwrap_or(""), b),
-            None => item.proj().unwrap_or("").to_string(),
+            Some(b) => format!("{} ({})", item.proj().unwrap_or("(no project)"), b),
+            None => item.proj().unwrap_or("(no project)").to_string(),
         },
-        other => item.get(other).unwrap_or("").to_string(),
+        other => item.get(other).unwrap_or("(none)").to_string(),
     }
 }
 
@@ -360,26 +360,7 @@ pub fn render_list(inbox: &Inbox, width: usize, colors: bool, group_by: &[String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{InboxItem, Status};
-    use std::collections::HashMap;
-
-    /// Helper to create an InboxItem with attrs
-    fn make_item(
-        msg: &str,
-        pane: u32,
-        proj: &str,
-        branch: Option<&str>,
-        status: Status,
-    ) -> InboxItem {
-        let mut attrs = HashMap::new();
-        attrs.insert("msg".to_string(), msg.to_string());
-        attrs.insert("pane".to_string(), pane.to_string());
-        attrs.insert("proj".to_string(), proj.to_string());
-        if let Some(b) = branch {
-            attrs.insert("branch".to_string(), b.to_string());
-        }
-        InboxItem { attrs, status }
-    }
+    use crate::{test_utils::make_item, Status};
 
     fn sample_inbox() -> Inbox {
         Inbox {

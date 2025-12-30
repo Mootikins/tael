@@ -150,7 +150,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     use std::io::Read;
                     let mut input = String::new();
                     std::io::stdin().read_to_string(&mut input)?;
-                    Some(serde_json::from_str(&input)?)
+                    Some(
+                        serde_json::from_str(&input)
+                            .map_err(|e| format!("invalid JSON on stdin: {}", e))?,
+                    )
                 } else {
                     None
                 };
