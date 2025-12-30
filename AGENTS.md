@@ -52,31 +52,7 @@ cargo run -- add "test" -p 1 --project myproj
 
 ## Commits
 
-Use [Conventional Commits](https://www.conventionalcommits.org/):
-
-```
-<type>(<scope>): <description>
-
-[optional body]
-```
-
-**Types:**
-- `feat`: New feature
-- `fix`: Bug fix
-- `docs`: Documentation only
-- `refactor`: Code change that neither fixes a bug nor adds a feature
-- `test`: Adding or updating tests
-- `chore`: Build process, dependencies, CI
-
-**Scopes:** `tui`, `cli`, `parse`, `config`, `file`, `ci`
-
-**Examples:**
-```
-feat(tui): add vim-style scrolling with Ctrl+d/u
-fix(parse): handle empty branch names in project header
-docs: update README with tmux integration
-chore(ci): add Windows build to matrix
-```
+Use [Conventional Commits](https://www.conventionalcommits.org/). Scopes: `tui`, `cli`, `parse`, `config`, `file`, `ci`.
 
 ## File Format
 
