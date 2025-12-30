@@ -13,8 +13,13 @@ static SECTION_RE: LazyLock<Regex> =
 static PROJECT_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^### ([^\(]+?)(?:\s*\(([^\)]+)\))?$").expect("valid regex"));
 
+// Match item line: - [x] text [key:: value]...
 static ITEM_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^- \[(.)\] (.+?) \[pane:: (\d+)\]$").expect("valid regex"));
+    LazyLock::new(|| Regex::new(r"^- \[(.)\] (.+)$").expect("valid regex"));
+
+// Match individual [key:: value] pairs (key cannot contain : or ])
+static ATTR_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\[([^:\]]+):: ([^\]]+)\]").expect("valid regex"));
 
 /// Parse an inbox from markdown content
 pub fn parse(content: &str) -> Inbox {
@@ -30,8 +35,8 @@ pub fn parse(content: &str) -> Inbox {
         if let Some(caps) = SECTION_RE.captures(line) {
             let section_name = caps.get(1).unwrap().as_str();
             current_status = match section_name {
-                "Waiting for Input" => Status::Waiting,
-                "Background" => Status::Working,
+                "Waiting for Input" | "Waiting" => Status::Waiting,
+                "Background" | "Working" => Status::Working,
                 _ => current_status,
             };
             continue;
@@ -44,21 +49,47 @@ pub fn parse(content: &str) -> Inbox {
             continue;
         }
 
+        // Skip project headers (### ...) - no longer used in flat format
+        if line.starts_with("###") {
+            continue;
+        }
+
         // Check for item
         if let Some(caps) = ITEM_RE.captures(line) {
             let status_char = caps.get(1).unwrap().as_str().chars().next().unwrap();
-            let text = caps.get(2).unwrap().as_str().to_string();
-            let pane_id: u32 = caps.get(3).unwrap().as_str().parse().unwrap_or(0);
+            let rest = caps.get(2).unwrap().as_str();
 
             let status = Status::from_char(status_char).unwrap_or(current_status);
 
-            inbox.items.push(InboxItem {
-                text,
-                pane_id,
-                project: current_project.clone(),
-                branch: current_branch.clone(),
-                status,
-            });
+            // Extract all [key:: value] attrs
+            let mut attrs = std::collections::HashMap::new();
+            for attr_cap in ATTR_RE.captures_iter(rest) {
+                let key = attr_cap.get(1).unwrap().as_str().trim().to_string();
+                let value = attr_cap.get(2).unwrap().as_str().trim().to_string();
+                attrs.insert(key, value);
+            }
+
+            // Extract message text (everything before first [key:: pattern)
+            let msg = if let Some(m) = ATTR_RE.find(rest) {
+                rest[..m.start()].trim().to_string()
+            } else {
+                rest.trim().to_string()
+            };
+            if !msg.is_empty() {
+                attrs.insert("msg".to_string(), msg);
+            }
+
+            // Inject project/branch from ### headers if present and not in attrs
+            if !current_project.is_empty() && !attrs.contains_key("proj") {
+                attrs.insert("proj".to_string(), current_project.clone());
+            }
+            if let Some(ref branch) = current_branch {
+                if !attrs.contains_key("branch") {
+                    attrs.insert("branch".to_string(), branch.clone());
+                }
+            }
+
+            inbox.items.push(InboxItem { attrs, status });
         }
     }
 
@@ -84,9 +115,9 @@ mod tests {
 "#;
         let inbox = parse(content);
         assert_eq!(inbox.items.len(), 1);
-        assert_eq!(inbox.items[0].text, "claude-code: Auth question");
-        assert_eq!(inbox.items[0].pane_id, 42);
-        assert_eq!(inbox.items[0].project, "crucible");
+        assert_eq!(inbox.items[0].msg(), "claude-code: Auth question");
+        assert_eq!(inbox.items[0].pane_id(), Some(42));
+        assert_eq!(inbox.items[0].proj(), Some("crucible"));
         assert_eq!(inbox.items[0].status, Status::Waiting);
     }
 
@@ -99,8 +130,8 @@ mod tests {
 "#;
         let inbox = parse(content);
         assert_eq!(inbox.items.len(), 1);
-        assert_eq!(inbox.items[0].project, "crucible");
-        assert_eq!(inbox.items[0].branch, Some("feat/inbox".to_string()));
+        assert_eq!(inbox.items[0].proj(), Some("crucible"));
+        assert_eq!(inbox.items[0].branch(), Some("feat/inbox"));
     }
 
     #[test]
@@ -121,13 +152,40 @@ mod tests {
         let inbox = parse(content);
         assert_eq!(inbox.items.len(), 3);
 
-        assert_eq!(inbox.items[0].project, "crucible");
+        assert_eq!(inbox.items[0].proj(), Some("crucible"));
         assert_eq!(inbox.items[0].status, Status::Waiting);
 
-        assert_eq!(inbox.items[1].project, "k3s");
+        assert_eq!(inbox.items[1].proj(), Some("k3s"));
         assert_eq!(inbox.items[1].status, Status::Waiting);
 
-        assert_eq!(inbox.items[2].project, "crucible");
+        assert_eq!(inbox.items[2].proj(), Some("crucible"));
         assert_eq!(inbox.items[2].status, Status::Working);
+    }
+
+    #[test]
+    fn parse_multiple_attrs() {
+        let content = r#"## Waiting
+
+- [ ] hello world [pane:: 42] [proj:: tael] [type:: test]
+"#;
+        let inbox = parse(content);
+        assert_eq!(inbox.items.len(), 1);
+        assert_eq!(inbox.items[0].get("pane"), Some("42"));
+        assert_eq!(inbox.items[0].get("proj"), Some("tael"));
+        assert_eq!(inbox.items[0].get("type"), Some("test"));
+        assert_eq!(inbox.items[0].msg(), "hello world");
+    }
+
+    #[test]
+    fn parse_msg_with_brackets() {
+        // Edge case: message containing [ should not be truncated
+        let content = r#"## Waiting
+
+- [ ] Fix [bug] in parser [pane:: 42]
+"#;
+        let inbox = parse(content);
+        assert_eq!(inbox.items.len(), 1);
+        assert_eq!(inbox.items[0].msg(), "Fix [bug] in parser");
+        assert_eq!(inbox.items[0].pane_id(), Some(42));
     }
 }

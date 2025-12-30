@@ -1,6 +1,7 @@
 //! Core types for agent inbox
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Status of an inbox item
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,20 +40,45 @@ impl Status {
     }
 }
 
-/// A single inbox item
+/// A single inbox item with generic attributes
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InboxItem {
-    /// Display text (e.g., "claude-code: Auth question")
-    pub text: String,
-    /// Pane ID (unique key)
-    pub pane_id: u32,
-    /// Project name
-    pub project: String,
-    /// Git branch (optional)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub branch: Option<String>,
+    /// Generic key-value attributes
+    pub attrs: HashMap<String, String>,
     /// Current status
     pub status: Status,
+}
+
+impl InboxItem {
+    /// Create new item with attrs
+    pub fn new(attrs: HashMap<String, String>, status: Status) -> Self {
+        Self { attrs, status }
+    }
+
+    /// Get attribute value
+    pub fn get(&self, key: &str) -> Option<&str> {
+        self.attrs.get(key).map(|s| s.as_str())
+    }
+
+    /// Get pane ID (convention: "pane" attr parsed as u32)
+    pub fn pane_id(&self) -> Option<u32> {
+        self.get("pane").and_then(|s| s.parse().ok())
+    }
+
+    /// Get message text (convention: "msg" attr)
+    pub fn msg(&self) -> &str {
+        self.get("msg").unwrap_or("")
+    }
+
+    /// Get project (convention: "proj" attr)
+    pub fn proj(&self) -> Option<&str> {
+        self.get("proj")
+    }
+
+    /// Get branch (convention: "branch" attr)
+    pub fn branch(&self) -> Option<&str> {
+        self.get("branch")
+    }
 }
 
 /// The inbox containing all items
@@ -72,31 +98,54 @@ impl Inbox {
         self.items.is_empty()
     }
 
-    /// Add or update an item by pane_id
+    /// Add or update an item by pane attr
     pub fn upsert(&mut self, item: InboxItem) {
-        if let Some(existing) = self.items.iter_mut().find(|i| i.pane_id == item.pane_id) {
-            *existing = item;
-        } else {
-            self.items.push(item);
+        if let Some(pane) = item.pane_id() {
+            if let Some(existing) = self.items.iter_mut().find(|i| i.pane_id() == Some(pane)) {
+                *existing = item;
+                self.sort();
+                return;
+            }
         }
+        self.items.push(item);
         self.sort();
     }
 
-    /// Remove an item by pane_id
+    /// Remove an item by pane ID
     pub fn remove(&mut self, pane_id: u32) -> bool {
         let len_before = self.items.len();
-        self.items.retain(|i| i.pane_id != pane_id);
+        self.items.retain(|i| i.pane_id() != Some(pane_id));
         self.items.len() < len_before
     }
 
-    /// Sort items: Waiting before Working, then by project
+    /// Sort items: Waiting before Working, then by proj
     fn sort(&mut self) {
-        self.items.sort_by(|a, b| {
-            match (a.status, b.status) {
-                (Status::Waiting, Status::Working) => std::cmp::Ordering::Less,
-                (Status::Working, Status::Waiting) => std::cmp::Ordering::Greater,
-                _ => (&a.project, &a.branch).cmp(&(&b.project, &b.branch)),
-            }
+        self.items.sort_by(|a, b| match (a.status, b.status) {
+            (Status::Waiting, Status::Working) => std::cmp::Ordering::Less,
+            (Status::Working, Status::Waiting) => std::cmp::Ordering::Greater,
+            _ => a.proj().cmp(&b.proj()),
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inbox_item_attrs() {
+        let mut attrs = std::collections::HashMap::new();
+        attrs.insert("msg".to_string(), "hello".to_string());
+        attrs.insert("pane".to_string(), "42".to_string());
+        attrs.insert("proj".to_string(), "tael".to_string());
+
+        let item = InboxItem {
+            attrs,
+            status: Status::Waiting,
+        };
+
+        assert_eq!(item.get("msg"), Some("hello"));
+        assert_eq!(item.get("pane"), Some("42"));
+        assert_eq!(item.pane_id(), Some(42));
     }
 }
