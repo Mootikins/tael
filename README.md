@@ -1,12 +1,23 @@
-# tael
+<p align="center">
+  <img src="assets/logo.png" alt="tael logo" width="128">
+</p>
 
-> **T**erminal-**A**gnostic **E**vent **L**ister
+<h1 align="center">tael</h1>
 
-[![CI](https://github.com/moot/tael/actions/workflows/ci.yml/badge.svg)](https://github.com/moot/tael/actions/workflows/ci.yml)
-[![Crates.io](https://img.shields.io/crates/v/tael.svg)](https://crates.io/crates/tael)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+<p align="center">
+  <strong>T</strong>erminal-<strong>A</strong>gnostic <strong>E</strong>vent <strong>L</strong>ister
+</p>
 
-A lightweight TUI for tracking AI agent status across terminal panes. Know when your agents need attention without constantly checking each pane.
+<p align="center">
+  <a href="https://github.com/moot/tael/actions/workflows/ci.yml"><img src="https://github.com/moot/tael/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://crates.io/crates/tael"><img src="https://img.shields.io/crates/v/tael.svg" alt="Crates.io"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+</p>
+
+<p align="center">
+  A lightweight TUI for tracking AI agent status across terminal panes.<br>
+  Know when your agents need attention without constantly checking each pane.
+</p>
 
 Named after [Tael](https://zelda.fandom.com/wiki/Tael), the purple fairy from Zelda: Majora's Mask.
 
