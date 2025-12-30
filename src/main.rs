@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::process;
 
 use clap::{Parser, Subcommand};
-use tael::{config::Config, file, render, Inbox, InboxItem, Status};
+use tael::{config::Config, file, Inbox, InboxItem, Status};
 
 #[derive(Parser)]
 #[command(name = "tael")]
@@ -125,14 +125,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::List { json } => {
+            use std::io::IsTerminal;
             let inbox = file::load(&path)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&inbox)?);
-            } else if inbox.is_empty() {
-                println!("(no items)");
             } else {
-                // Print markdown format
-                print!("{}", render::render(&inbox));
+                // Use TUI render with terminal width
+                let width = crossterm::terminal::size().map(|(w, _)| w as usize).unwrap_or(80);
+                let is_tty = std::io::stdout().is_terminal();
+                let opts = tael::tui::RenderOptions {
+                    width,
+                    height: 1000, // no height limit for list
+                    checkbox_style: config.checkbox_style.parse().unwrap_or_default(),
+                    colors: config.colors && is_tty,
+                };
+                print!("{}", tael::tui::render(&inbox, 0, &opts));
             }
         }
 
