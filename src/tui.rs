@@ -8,13 +8,13 @@ use std::time::Duration;
 use ratatui::{
     crossterm::{
         event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
-        terminal::{disable_raw_mode, enable_raw_mode, is_raw_mode_enabled},
+        terminal::{disable_raw_mode, enable_raw_mode},
     },
     layout::{Constraint, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
-    DefaultTerminal, Frame, TerminalOptions, Viewport,
+    Frame, TerminalOptions, Viewport,
 };
 
 use crate::config::Config;
@@ -25,6 +25,9 @@ const TUI_HEIGHT: u16 = 12;
 
 /// Run interactive TUI mode with inline viewport
 pub fn run_interactive(config: &Config) -> io::Result<()> {
+    use std::io::stdout;
+    use ratatui::{backend::CrosstermBackend, Terminal};
+
     let path = crate::file::default_path();
     let inbox = crate::file::load(&path)?;
 
@@ -32,23 +35,19 @@ pub fn run_interactive(config: &Config) -> io::Result<()> {
     let item_count = inbox.items.len();
     let height = (item_count as u16 + 5).min(TUI_HEIGHT).max(6); // min 6 for empty state
 
-    // Use ratatui's init_with_options which should handle raw mode
-    let mut terminal = ratatui::init_with_options(TerminalOptions {
-        viewport: Viewport::Inline(height),
-    });
+    // Manual setup for debugging - enable raw mode FIRST
+    enable_raw_mode()?;
 
-    // Verify raw mode is enabled - enable manually if not
-    if !is_raw_mode_enabled().unwrap_or(false) {
-        enable_raw_mode()?;
-    }
+    // Create terminal with inline viewport manually
+    let backend = CrosstermBackend::new(stdout());
+    let mut terminal = Terminal::with_options(backend, TerminalOptions {
+        viewport: Viewport::Inline(height),
+    })?;
 
     let result = run_app(&mut terminal, inbox, config, &path);
 
-    // Restore terminal state (disables raw mode, etc.)
-    ratatui::restore();
-
-    // Extra safety: ensure raw mode is disabled
-    let _ = disable_raw_mode();
+    // Cleanup
+    disable_raw_mode()?;
     println!();
 
     result
@@ -129,8 +128,8 @@ impl App {
     }
 }
 
-fn run_app(
-    terminal: &mut DefaultTerminal,
+fn run_app<B: ratatui::backend::Backend>(
+    terminal: &mut ratatui::Terminal<B>,
     inbox: Inbox,
     config: &Config,
     path: &std::path::Path,
